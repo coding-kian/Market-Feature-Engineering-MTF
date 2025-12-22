@@ -1,0 +1,1347 @@
+//@version=4
+study("2.MTV MTF", overlay=false, max_labels_count=500, max_bars_back=5000)
+
+
+// Functions & Constants, GLOBAL
+var mtvs_default_weighting_ratios = array.new_float(10)
+array.set(mtvs_default_weighting_ratios, 0, 21)
+array.set(mtvs_default_weighting_ratios, 1, 18)
+array.set(mtvs_default_weighting_ratios, 2, 15)
+array.set(mtvs_default_weighting_ratios, 3, 12)
+array.set(mtvs_default_weighting_ratios, 4, 10)
+array.set(mtvs_default_weighting_ratios, 5, 8)
+array.set(mtvs_default_weighting_ratios, 6, 6)
+array.set(mtvs_default_weighting_ratios, 7, 4)
+array.set(mtvs_default_weighting_ratios, 8, 3)
+array.set(mtvs_default_weighting_ratios, 9, 3)
+
+var mtvs_default_weights = array.new_float(16)
+array.set(mtvs_default_weights, 0, 1.0)
+array.set(mtvs_default_weights, 1, 1.2)
+array.set(mtvs_default_weights, 2, 1.35)
+array.set(mtvs_default_weights, 3, 2.0)
+array.set(mtvs_default_weights, 4, 2.1)
+array.set(mtvs_default_weights, 5, 2.2)
+array.set(mtvs_default_weights, 6, 2.25)
+array.set(mtvs_default_weights, 7, 2.3)
+array.set(mtvs_default_weights, 8, 2.35)
+array.set(mtvs_default_weights, 9, 2.4)
+array.set(mtvs_default_weights, 10, 2.5)
+array.set(mtvs_default_weights, 11, 2.8)
+array.set(mtvs_default_weights, 12, 3.2)
+array.set(mtvs_default_weights, 13, 3.6)
+array.set(mtvs_default_weights, 14, 3.35)
+array.set(mtvs_default_weights, 15, 0.0)
+
+var tp_bb_default_weights = array.new_float(4)
+array.set(tp_bb_default_weights, 0, 1.0)
+array.set(tp_bb_default_weights, 1, 1.15)
+array.set(tp_bb_default_weights, 2, 1.3)
+array.set(tp_bb_default_weights, 3, 1.15)
+
+var tp_mtvd_default_weights = array.new_float(5)
+array.set(tp_mtvd_default_weights, 0, 1.0)
+array.set(tp_mtvd_default_weights, 1, 1.15)
+array.set(tp_mtvd_default_weights, 2, 1.3)
+array.set(tp_mtvd_default_weights, 3, 1.4)
+array.set(tp_mtvd_default_weights, 4, 1.15)
+
+var tp_mtvl_default_weights = array.new_float(6)
+array.set(tp_mtvl_default_weights, 0, 1.0)
+array.set(tp_mtvl_default_weights, 1, 1.3)
+array.set(tp_mtvl_default_weights, 2, 1.15)
+array.set(tp_mtvl_default_weights, 3, 1.3)
+array.set(tp_mtvl_default_weights, 4, 1.3)
+array.set(tp_mtvl_default_weights, 5, 1.5)
+
+pos_calculator(pos) => pos*100/close // pos = percentage of account to enter... so if $20/price = amount of ticker i can buy, 100 is initial capital
+decimal_place(value, dp) => round(value*pow(10, dp))/pow(10, dp) // 10^dp
+index_counter(to_count, amount) => sum(to_count ? 1: 0, amount)
+
+mtv_values() =>
+	// Functions & Constants
+    vol_8ema = ema(volume, 8)
+    price_8ema = ema(close, 8)
+    vol_13ema = ema(volume, 13) 
+    price_13ema = ema(close, 13)
+    price_20ema = ema(close, 20)
+    price_20ema_stdev = stdev(close, 20)
+    oc = open - close
+    oc_13ema = ema(abs(oc), 13)
+    oc_20ema = ema(abs(oc), 20)
+    green_candle = oc < 0
+    red_candle = oc > 0
+    
+    vol_8ema_roc = ((vol_8ema-vol_8ema[1])/vol_8ema)*100
+    vol_8ema_roc_20ema_stdev = stdev(vol_8ema_roc, 20)
+    vol_8ema_roc_20ema = ema(vol_8ema_roc, 20)
+    engulfing_vol = vol_8ema_roc > vol_8ema_roc_20ema + vol_8ema_roc_20ema_stdev
+    exhausted_vol = vol_8ema_roc < vol_8ema_roc_20ema - vol_8ema_roc_20ema_stdev
+    above_20ema = open > price_20ema and close > price_20ema
+    below_20ema = open < price_20ema and close < price_20ema
+    above_3x20ema = index_counter(above_20ema, 3) == 3
+    below_3x20ema = index_counter(below_20ema, 3) == 3
+    
+    
+    
+    // VOLUME TRNED
+    cng_vol_8ema = (vol_8ema[1]-vol_8ema)/vol_8ema
+    cng_price_8ema = (price_8ema[1]-price_8ema)/price_8ema
+    trend_bull = cng_vol_8ema < 0 and cng_price_8ema < 0
+    trend_bear = cng_vol_8ema < 0 and cng_price_8ema > 0
+    trend_bull_dubious = cng_vol_8ema > 0 and cng_price_8ema < 0
+    trend_bear_dubious = cng_vol_8ema > 0 and cng_price_8ema > 0
+    
+    
+    
+    // MACD
+    macd = price_8ema - price_13ema
+    macd_signal = sma(macd, 3) // signal length is 3
+    macd_13ema = ema(macd, 13)
+    macd_bull = macd > macd_13ema
+    macd_bear  = macd < macd_13ema
+    macd_bull_dubious = macd > macd_signal
+    macd_bear_dubious = macd < macd_signal
+    
+    
+    
+    // MACD TRENDING VOLUME = MTV
+    bull_1 = macd_bull and macd_bull_dubious and trend_bull
+    bull_2 = macd_bull and macd_bull_dubious and trend_bull_dubious 
+    bull_3 = macd_bear and macd_bull_dubious and trend_bull
+    bull_4 = macd_bear and macd_bull_dubious and trend_bull_dubious
+    bull_5 = (macd_bull and macd_bear_dubious) and (trend_bull or trend_bull_dubious)
+    bull_6 = (macd_bull and macd_bull_dubious) and (trend_bear or trend_bear_dubious)
+    bear_1 = macd_bear and macd_bear_dubious and trend_bear
+    bear_2 = macd_bear and macd_bear_dubious and trend_bear_dubious
+    bear_3 = macd_bull and macd_bear_dubious and trend_bear
+    bear_4 = macd_bull and macd_bear_dubious and trend_bear_dubious
+    bear_5 = (macd_bear and macd_bull_dubious) and (trend_bear or trend_bear_dubious)
+    bear_6 = (macd_bear and macd_bear_dubious) and (trend_bull or trend_bull_dubious)
+    
+    
+    
+    // MTV Loops
+    bull_2_index5 = index_counter(bull_2, 5)
+    bull_6_index5 = index_counter(bull_6, 5)
+    bull_1_index7 = index_counter(bull_1, 7)
+    bull_2_index7 = index_counter(bull_2, 7)
+    bull_4_index7 = index_counter(bull_4, 7)
+    bull_6_index7 = index_counter(bull_6, 7)
+    bull_1_index10 = index_counter(bull_1, 10)
+    bull_2_index10 = index_counter(bull_2, 10)
+    bull_4_index10 = index_counter(bull_4, 10)
+    bull_5_index10 = index_counter(bull_5, 10)
+    bear_2_index5 = index_counter(bear_2, 5)
+    bear_6_index5 = index_counter(bear_6, 5)
+    bear_1_index7 = index_counter(bear_1, 7)
+    bear_2_index7 = index_counter(bear_2, 7)
+    bear_4_index7 = index_counter(bear_4, 7)
+    bear_6_index7 = index_counter(bear_6, 7)
+    bear_1_index10 = index_counter(bear_1, 10)
+    bear_2_index10 = index_counter(bear_2, 10)
+    bear_4_index10 = index_counter(bear_4, 10)
+    bear_5_index10 = index_counter(bear_5, 10)
+    
+    green_colour = bull_1 or bull_2 or bull_3 or bull_4 or bull_5 or bull_6
+    red_colour = bear_1 or bear_2 or bear_3 or bear_4 or bear_5 or bear_6
+    
+    
+    
+    
+    // MTV Dots
+    mtv_dot_bull = ((green_candle and abs(oc) > tr*0.45) and (bull_1 or bull_3 or bull_6)) or (
+         (green_candle and abs(oc) > tr*0.3) and (bull_2 or bull_4)) or (
+         bear_5 and green_candle and abs(oc) > tr*0.45)
+    mtv_dot_bear = ((red_candle and abs(oc) > tr*0.45) and (bear_1 or bear_3 or bear_6)) or (
+         (red_candle and abs(oc) > tr*0.3) and (bear_2 or bear_4)) or (
+         bull_5 and red_candle and abs(oc) > tr*0.45)
+    
+    
+    mtv_dot_bull_index5 = index_counter(mtv_dot_bull, 5)
+    mtv_dot_bear_index5 = index_counter(mtv_dot_bear, 5)
+    mtv_dot_bull_index10 = index_counter(mtv_dot_bull, 10)
+    mtv_dot_bear_index10 = index_counter(mtv_dot_bear, 10)
+    
+    bull_dots = mtv_dot_bull or mtv_dot_bull_index5 > 2 or mtv_dot_bull_index10 > 5
+    bull_dot_s = mtv_dot_bull and not(mtv_dot_bull_index5 > 2 or mtv_dot_bull_index10 > 5)
+    bull_dot_m = mtv_dot_bull_index5 > 2 and not(mtv_dot_bull_index10 > 5)
+    bull_dot_l = mtv_dot_bull_index10 > 5
+    bear_dots = mtv_dot_bear or mtv_dot_bear_index5 > 2 or mtv_dot_bear_index10 > 5
+    bear_dot_s = mtv_dot_bear and not(mtv_dot_bear_index5 > 2 or mtv_dot_bear_index10 > 5)
+    bear_dot_m = mtv_dot_bear_index5 > 2 and not(mtv_dot_bear_index10 > 5)
+    bear_dot_l = mtv_dot_bear_index10 > 5
+    
+    
+    // bull
+    // M*; [1,2,3,4,5]
+    mtvd_m_total_bull = 0.0
+    mtvd_m_weight_bull = 0.0
+    
+    if bull_dot_m 
+        for i= 0 to 4
+            if mtv_dot_bull[i]
+                mtvd_m_total_bull += 5-i
+        mtvd_m_weight_bull :=
+         (mtv_dot_bull ? mtvd_m_total_bull*1 :
+         mtv_dot_bull[1] ? mtvd_m_total_bull*0.75 :
+         mtv_dot_bull[2] ? mtvd_m_total_bull*0.5 : 0.0)/15
+    
+    mtvd_l_to_m_bull = bull_dot_l[1] and bull_dot_m and not(mtv_dot_bull[1])
+    mtvd_m_weight_bull *=
+     mtvd_l_to_m_bull ? 1.2 :
+     mtvd_l_to_m_bull[1] ? 1.1 : 1.0
+
+    // L*; [1,2,3,4,5,6,7,8,9,10]
+    mtvd_l_total_bull = 0.0
+    mtvd_l_weight_bull = 0.0
+    if bull_dot_l 
+        for i= 0 to 9 
+            if mtv_dot_bull[i]
+                mtvd_l_total_bull += 10-i
+        mtvd_l_weight_bull :=
+         (mtv_dot_bull ? mtvd_l_total_bull*1 :
+         mtv_dot_bull[1] ? mtvd_l_total_bull*0.85 :
+         mtv_dot_bull[2] ? mtvd_l_total_bull*0.7 :
+         mtv_dot_bull[3] ? mtvd_l_total_bull*0.55 :
+         mtv_dot_bull[4] ? mtvd_l_total_bull*0.4 : 0.0)/55
+    
+    
+    // bear
+    // M*; [1,2,3,4,5]
+    mtvd_m_total_bear = 0.0
+    mtvd_m_weight_bear = 0.0
+    
+    if bear_dot_m 
+        for i= 0 to 4
+            if mtv_dot_bear[i]
+                mtvd_m_total_bear += 5-i
+        mtvd_m_weight_bear :=
+         (mtv_dot_bear ? mtvd_m_total_bear*1 :
+         mtv_dot_bear[1] ? mtvd_m_total_bear*0.75 :
+         mtv_dot_bear[2] ? mtvd_m_total_bear*0.5 : 0.0)/15
+    
+    mtvd_l_to_m_bear = bear_dot_l[1] and bear_dot_m and not(mtv_dot_bear[1])
+    mtvd_m_weight_bear *=
+     mtvd_l_to_m_bear ? 1.2 :
+     mtvd_l_to_m_bear[1] ? 1.1 : 1.0
+
+    // L*; [1,2,3,4,5,6,7,8,9,10]
+    mtvd_l_total_bear = 0.0
+    mtvd_l_weight_bear = 0.0
+    if bear_dot_l 
+        for i= 0 to 9 
+            if mtv_dot_bear[i]
+                mtvd_l_total_bear += 10-i
+        mtvd_l_weight_bear :=
+         (mtv_dot_bear ? mtvd_l_total_bear*1 :
+         mtv_dot_bear[1] ? mtvd_l_total_bear*0.85 :
+         mtv_dot_bear[2] ? mtvd_l_total_bear*0.7 :
+         mtv_dot_bear[3] ? mtvd_l_total_bear*0.55 :
+         mtv_dot_bear[4] ? mtvd_l_total_bear*0.4 : 0.0)/55
+    
+    
+    
+    // MTV Signals 
+    // bull
+    mtvs_current_index_bull = 15
+    // 1
+    if  bear_2[1] and bear_5
+        mtvs_current_index_bull := 0
+    if bear_2_index7 > 1 and index_counter(bear_5, 7) > 1     
+        mtvs_current_index_bull := 1
+    if (bear_2_index10 > 2 and bear_5_index10 > 3) or (bear_2_index10 > 3 and bear_5_index10 > 2)
+        mtvs_current_index_bull := 2
+    // 2, 2.2, 2.3
+    mtvs_current_index_bull :=
+     bull_3[1] and bull_2 ? 3 :
+     bull_4[1] and bull_2 ? 4 :
+     bull_4[1] and bull_3 ? 5 :
+     bull_4[1] and bull_1 ? 6 :
+     bull_6[1] and bull_1 ? 7 :
+     bull_3[1] and bull_1 ? 8 : mtvs_current_index_bull
+    // 2.4, 2.5, 2.8
+    if (bull_2_index5 > 1 and bull_6_index5 > 0) or (bull_2_index5 > 0 and bull_6_index5 > 1)
+        mtvs_current_index_bull := 9
+    if (bull_2_index7 > 2 and bull_6_index7 > 1) or (bull_2_index7 > 1 and bull_6_index7 > 2)
+        mtvs_current_index_bull := 10
+    if bear_5_index10 > 0 and bear_1_index7 > 2 and bull_1[1]
+        mtvs_current_index_bull := 11
+    // 3
+    if index_counter(bull_1, 5) > 1 and bull_2_index5 > 0
+        mtvs_current_index_bull := 12
+    if bull_1_index7 > 2 and bull_2_index7 > 1
+        mtvs_current_index_bull := 13
+    if (bull_1_index10 > 3 and bull_2_index10 > 2) or (bull_1_index10 > 2 and bull_2_index10 > 3)
+        mtvs_current_index_bull := 14
+    
+    // weights
+    var mtvs_last_index_bull = array.new_int(15)   
+    var mtvs_adjusted_weights_bull = array.new_float(15)
+    mtvs_last_index_val_bull = 0
+    mtvs_range_bull = 0
+    mtvs_adjusted_range_bull = 0.0
+    for i=0 to 14
+        mtvs_last_index_val_bull := mtvs_current_index_bull == i and mtvs_current_index_bull != mtvs_current_index_bull[1] ? 0 : array.get(mtvs_last_index_bull, i) + 1
+        array.set(mtvs_last_index_bull, i, mtvs_last_index_val_bull)
+        mtvs_range_bull :=
+         i >= 0 and i <= 2 ? 50 :
+         i >= 3 and i <= 8 ? 40 :
+         i == 9 or i == 10 ? 30 : 
+         i == 11 or i == 14 ? 20 : 
+         i == 12 or i == 13 ? 10 : 0
+        for j=1 to 5
+            if int((mtvs_range_bull-1)/10) == j-1 and mtvs_last_index_val_bull < 10*j
+                mtvs_adjusted_range_bull := array.get(mtvs_default_weighting_ratios, int(mtvs_last_index_val_bull/j))/21
+                array.set(mtvs_adjusted_weights_bull, i, array.get(mtvs_default_weights, i)*mtvs_adjusted_range_bull)
+            if mtvs_last_index_val_bull > mtvs_range_bull
+                array.set(mtvs_adjusted_weights_bull, i, 0.0)
+    
+    // bear
+    mtvs_current_index_bear = 15
+    // 1
+    if  bull_2[1] and bull_5
+        mtvs_current_index_bear := 0
+    if bull_2_index7 > 1 and index_counter(bull_5, 7) > 1     
+        mtvs_current_index_bear := 1
+    if (bull_2_index10 > 2 and bull_5_index10 > 3) or (bull_2_index10 > 3 and bull_5_index10 > 2)
+        mtvs_current_index_bear := 2
+    // 2, 2.2, 2.3
+    mtvs_current_index_bear :=
+     bear_3[1] and bear_2 ? 3 :
+     bear_4[1] and bear_2 ? 4 :
+     bear_4[1] and bear_3 ? 5 :
+     bear_4[1] and bear_1 ? 6 :
+     bear_6[1] and bear_1 ? 7 :
+     bear_3[1] and bear_1 ? 8 : mtvs_current_index_bear
+    // 2.4, 2.5, 2.8
+    if (bear_2_index5 > 1 and bear_6_index5 > 0) or (bear_2_index5 > 0 and bear_6_index5 > 1)
+        mtvs_current_index_bear := 9
+    if (bear_2_index7 > 2 and bear_6_index7 > 1) or (bear_2_index7 > 1 and bear_6_index7 > 2)
+        mtvs_current_index_bear := 10
+    if bull_5_index10 > 0 and bull_1_index7 > 2 and bear_1[1]
+        mtvs_current_index_bear := 11
+    // 3
+    if index_counter(bear_1, 5) > 1 and bear_2_index5 > 0
+        mtvs_current_index_bear := 12
+    if bear_1_index7 > 2 and bear_2_index7 > 1
+        mtvs_current_index_bear := 13
+    if (bear_1_index10 > 3 and bear_2_index10 > 2) or (bear_1_index10 > 2 and bear_2_index10 > 3)
+        mtvs_current_index_bear := 14
+    
+    // weights
+    var mtvs_last_index_bear = array.new_int(15)
+    var mtvs_adjusted_weights_bear = array.new_float(15)
+    mtvs_last_index_val_bear = 0
+    mtvs_range_bear = 0
+    mtvs_adjusted_range_bear = 0.0
+    for i=0 to 14
+        mtvs_last_index_val_bear := mtvs_current_index_bear == i and mtvs_current_index_bear != mtvs_current_index_bear[1] ? 0 : array.get(mtvs_last_index_bear, i) + 1
+        array.set(mtvs_last_index_bear, i, mtvs_last_index_val_bear)
+        mtvs_range_bear :=
+         i >= 0 and i <= 2 ? 50 :
+         i >= 3 and i <= 8 ? 40 :
+         i == 9 or i == 10 ? 30 : 
+         i == 11 or i == 14 ? 20 : 
+         i == 12 or i == 13 ? 10 : 0
+        for j=1 to 5
+            if int((mtvs_range_bear-1)/10) == j-1 and mtvs_last_index_val_bear < 10*j
+                mtvs_adjusted_range_bear := array.get(mtvs_default_weighting_ratios, int(mtvs_last_index_val_bear/j))/21
+                array.set(mtvs_adjusted_weights_bear, i, array.get(mtvs_default_weights, i)*mtvs_adjusted_range_bear)
+            if mtvs_last_index_val_bear > mtvs_range_bear
+                array.set(mtvs_adjusted_weights_bear, i, 0.0)
+
+    
+    
+    // 20 EMA
+    good_3x20ema_bull = index_counter(green_colour, 10) >= 7 and above_3x20ema
+    good_3x20ema_weight_bull = index_counter(good_3x20ema_bull, 4) == 4 ? 1.5 : good_3x20ema_bull ? 1.2 : above_3x20ema ? 1.0 :
+     not(above_3x20ema or below_3x20ema) ? 0.75 : 0.0
+    
+    good_3x20ema_bear = index_counter(red_colour, 10) >= 7 and below_3x20ema
+    good_3x20ema_weight_bear = index_counter(good_3x20ema_bear, 4) == 4 ? 1.5 : good_3x20ema_bear ? 1.2 : below_3x20ema ? 1.0 :
+     not(above_3x20ema or below_3x20ema) ? 0.75 : 0.0
+    
+    
+    
+    // Run Up
+    run_up_oc = index_counter(oc_13ema > oc_13ema[1], 20)
+    run_up_vol = index_counter(vol_13ema > vol_13ema[1], 20)
+    run_up_price = index_counter(price_13ema > price_13ema[1], 13)// index_counter(price_13ema[0] < price_13ema[1], 13) is the same as abs(run_up_price-13)
+    run_up_bull = run_up_oc >= 9 and run_up_vol >= 9 and run_up_price == 13 and green_candle
+    run_up_bear = run_up_oc >= 9 and run_up_vol >= 9 and run_up_price == 0 and red_candle
+    
+    // bull
+    run_up_last_index_bull = barssince(run_up_bull)
+    run_up_weight_bull = run_up_last_index_bull >= 20 ? 0.0 : (1-(0.05*run_up_last_index_bull))*pow(1.05, index_counter(run_up_bull[0] and run_up_bull[1], 7))
+    
+    // bear
+    run_up_last_index_bear = barssince(run_up_bear)
+    run_up_weight_bear = run_up_last_index_bear >= 20 ? 0.0 : (1-(0.05*run_up_last_index_bear))*pow(1.05, index_counter(run_up_bear[0] and run_up_bear[1], 7))
+    
+    
+    
+    // Engfuling aka Large E
+    large_e_bull = (abs(oc) > oc_20ema*2 and engulfing_vol and green_candle)
+    large_e_last50_bull = index_counter(large_e_bull, 50)
+    large_e_bear = (abs(oc) > oc_20ema*2 and engulfing_vol and red_candle)
+    large_e_last50_bear = index_counter(large_e_bear, 50) 
+    large_e_last_index_either = barssince(large_e_bull or large_e_bear)
+    
+    // bull
+    large_e_good_bull = index_counter(green_colour, 5) >= 3 and large_e_bull and large_e_last50_bull <= 5 and large_e_last_index_either[1] > 15
+    large_e_good_last_index_bull = barssince(large_e_good_bull)
+    large_e_good_weight_bull = large_e_good_bull ? 1.0 : large_e_good_last_index_bull < 5 ? 0.65-(0.15*large_e_good_last_index_bull) : 0.0
+    
+    // bear
+    large_e_good_bear = index_counter(red_colour, 5) >= 3 and large_e_bear and large_e_last50_bear <= 5 and large_e_last_index_either[1] > 15
+    large_e_good_last_index_bear = barssince(large_e_good_bear)
+    large_e_good_weight_bear = large_e_good_bear ? 1.0 : large_e_good_last_index_bear < 5 ? 0.65-(0.15*large_e_good_last_index_bear) : 0.0
+    
+    
+    
+    
+    
+    // TAKING PROFIT, TP TAKE PROFIT
+    // TP Congruent AKA TPC
+    // bull SE bull
+    tp_congruent_current_val_bull = 9
+    tp_congruent_index_loop_bull = 0
+    tp_congruent_weight_loop_bull = 0.0
+    tp_congruent_weight_double_bull = 0.0
+    tp_congruent_double_bull = 0
+    var tp_congruent_last_index_bull = array.new_int(3)
+    var tp_congruent_weight_bull = array.new_float(3)
+    if bull_1 and green_candle
+        if (open-low) > tr*0.5 // hammer
+            tp_congruent_current_val_bull := 0
+            tp_congruent_double_bull += 1
+        if engulfing_vol and (high-close) < tr*0.3
+            tp_congruent_current_val_bull := 1
+            tp_congruent_double_bull += 1
+    
+    for i=0 to 1
+        tp_congruent_index_loop_bull := tp_congruent_current_val_bull == i ? 0 : array.get(tp_congruent_last_index_bull, i) + 1
+        array.set(tp_congruent_last_index_bull, i, tp_congruent_index_loop_bull)
+        if tp_congruent_index_loop_bull <= 10
+            tp_congruent_weight_loop_bull :=
+             tp_congruent_current_val_bull == i and tp_congruent_current_val_bull[1] == i and tp_congruent_current_val_bull[2] == i ? (1.2+0.1*i)*1.3 :
+             tp_congruent_current_val_bull == i and tp_congruent_current_val_bull[1] == i ? (1.2+0.1*i)*1.15 :
+             tp_congruent_index_loop_bull == 0 ? (1.2+0.1*i) :
+             array.get(tp_congruent_weight_bull, i) - (1.2+0.1*i)*(0.2-0.1*i)
+            if tp_congruent_weight_loop_bull < 0.0
+                tp_congruent_weight_loop_bull := 0.0
+            if tp_congruent_double_bull != 2
+                array.set(tp_congruent_weight_bull, i, tp_congruent_weight_loop_bull)
+        else
+            array.set(tp_congruent_weight_bull, i, 0.0)
+    
+    tp_congruent_index_loop_bull := tp_congruent_double_bull == 2 ? 0 : array.get(tp_congruent_last_index_bull, 2) + 1
+    array.set(tp_congruent_last_index_bull, 2, tp_congruent_index_loop_bull)
+    if array.get(tp_congruent_last_index_bull, 2) == 0
+        tp_congruent_weight_double_bull := tp_congruent_weight_loop_bull*1.3
+    else
+        tp_congruent_weight_double_bull := array.get(tp_congruent_last_index_bull, 2) <= 10 ? tp_congruent_weight_double_bull[1] - 0.14 : 0.0
+    array.set(tp_congruent_weight_bull, 2, tp_congruent_weight_double_bull)
+    if tp_congruent_double_bull == 2
+        tp_congruent_current_val_bull := 2
+    
+    
+    // bear SE BEAR
+    tp_congruent_current_val_bear = 9
+    tp_congruent_index_loop_bear = 0
+    tp_congruent_weight_loop_bear = 0.0
+    tp_congruent_weight_double_bear = 0.0
+    tp_congruent_double_bear = 0
+    var tp_congruent_last_index_bear = array.new_int(3)
+    var tp_congruent_weight_bear = array.new_float(3)
+    if bear_1 and red_candle
+        if (high-open) > tr*0.5 // star
+            tp_congruent_current_val_bear := 0
+            tp_congruent_double_bear += 1
+        if engulfing_vol and (close-low) < tr*0.3
+            tp_congruent_current_val_bear := 1
+            tp_congruent_double_bear += 1
+    
+    for i=0 to 1
+        tp_congruent_index_loop_bear := tp_congruent_current_val_bear == i ? 0 : array.get(tp_congruent_last_index_bear, i) + 1
+        array.set(tp_congruent_last_index_bear, i, tp_congruent_index_loop_bear)
+        if tp_congruent_index_loop_bear <= 10
+            tp_congruent_weight_loop_bear :=
+             tp_congruent_current_val_bear == i and tp_congruent_current_val_bear[1] == i and tp_congruent_current_val_bear[2] == i ? (1.2+0.1*i)*1.3 :
+             tp_congruent_current_val_bear == i and tp_congruent_current_val_bear[1] == i ? (1.2+0.1*i)*1.15 :
+             tp_congruent_index_loop_bear == 0 ? (1.2+0.1*i) :
+             array.get(tp_congruent_weight_bear, i) - (1.2+0.1*i)*(0.2-0.1*i)
+            if tp_congruent_weight_loop_bear < 0.0
+                tp_congruent_weight_loop_bear := 0.0
+            if tp_congruent_double_bear != 2
+                array.set(tp_congruent_weight_bear, i, tp_congruent_weight_loop_bear)
+        else
+            array.set(tp_congruent_weight_bear, i, 0.0)
+    
+    tp_congruent_index_loop_bear := tp_congruent_double_bear == 2 ? 0 : array.get(tp_congruent_last_index_bear, 2) + 1
+    array.set(tp_congruent_last_index_bear, 2, tp_congruent_index_loop_bear)
+    if array.get(tp_congruent_last_index_bear, 2) == 0
+        tp_congruent_weight_double_bear := tp_congruent_weight_loop_bear*1.3
+    else
+        tp_congruent_weight_double_bear := array.get(tp_congruent_last_index_bear, 2) <= 10 ? tp_congruent_weight_double_bear[1] - 0.14 : 0.0
+    array.set(tp_congruent_weight_bear, 2, tp_congruent_weight_double_bear)
+    if tp_congruent_double_bear == 2
+        tp_congruent_current_val_bear := 2
+    
+    
+    
+    // TAKING PROFIT BULL = SMALL ENTRY BEAR, FOR THE REST
+    // Bollinger Bands TP    
+    // bull, SE Bear
+    tp_bb_current_val_bull = 9
+    tp_bb_index_loop_bull = 0
+    tp_bb_weight_loop_bull = 0.0
+    tp_bb_weight2_loop_bull = 0.0
+    var tp_bb_last_index_bull = array.new_int(4)
+    var tp_bb_weight_bull = array.new_float(4)
+    two_away_above = (high[1] < price_20ema[1] + price_20ema_stdev[1]*2 )and (high < price_20ema + price_20ema_stdev*2)
+    bb_above_index1 = high[2] > price_20ema[2] + price_20ema_stdev[2]*2
+    bb_above_index5 = index_counter(high[2] > price_20ema[2] + price_20ema_stdev[2]*2, 5)
+    bb_above_index7 = index_counter(high[2] > price_20ema[2] + price_20ema_stdev[2]*2, 7)
+    bb_above_index10 = index_counter(high[2] > price_20ema[2] + price_20ema_stdev[2]*2, 10)
+    if two_away_above
+        if bb_above_index1 and red_candle[1] and red_candle
+            tp_bb_current_val_bull := 3
+        if bb_above_index5 >= 3
+            tp_bb_current_val_bull := 0
+        if bb_above_index7 >= 5
+            tp_bb_current_val_bull := 1
+        if bb_above_index10 >= 7
+            tp_bb_current_val_bull := 2
+    
+    for i=0 to 3
+        tp_bb_index_loop_bull := tp_bb_current_val_bull == i ? 0 : array.get(tp_bb_last_index_bull, i) + 1
+        array.set(tp_bb_last_index_bull, i, tp_bb_index_loop_bull)
+        if tp_bb_index_loop_bull <= 10
+            tp_bb_weight_loop_bull := array.get(tp_bb_default_weights, i)
+            if i == 0 or i == 1
+                tp_bb_weight2_loop_bull :=
+                 tp_bb_current_val_bull == i and tp_bb_current_val_bull[1] == i and tp_bb_current_val_bull[2] == i ? tp_bb_weight_loop_bull*1.3 :
+                 tp_bb_current_val_bull == i and tp_bb_current_val_bull[1] == i ? tp_bb_weight_loop_bull*1.15 :
+                 tp_bb_index_loop_bull == 0 ? tp_bb_weight_loop_bull :
+                 array.get(tp_bb_weight_bull, i) - tp_bb_weight_loop_bull*0.1
+            if i == 2
+                tp_bb_weight2_loop_bull :=
+                 tp_bb_current_val_bull == i and tp_bb_current_val_bull[1] == i and tp_bb_current_val_bull[2] == i and tp_bb_current_val_bull[3] == i ?
+                 tp_bb_weight_loop_bull*1.4 :
+                 tp_bb_current_val_bull == i and tp_bb_current_val_bull[1] == i and tp_bb_current_val_bull[2] == i ? tp_bb_weight_loop_bull*1.25 :
+                 tp_bb_current_val_bull == i and tp_bb_current_val_bull[1] == i ? tp_bb_weight_loop_bull*1.1 :
+                 tp_bb_index_loop_bull == 0 ? tp_bb_weight_loop_bull :
+                 array.get(tp_bb_weight_bull, i) - tp_bb_weight_loop_bull*0.1
+            if i == 3
+                tp_bb_weight2_loop_bull :=
+                 tp_bb_index_loop_bull == 0 ? tp_bb_weight_loop_bull :
+                 array.get(tp_bb_weight_bull, i) - tp_bb_weight_loop_bull*0.14286
+            if tp_bb_weight2_loop_bull < 0.0
+                tp_bb_weight2_loop_bull := 0.0
+            array.set(tp_bb_weight_bull, i, tp_bb_weight2_loop_bull)
+        else
+            array.set(tp_bb_weight_bull, i, 0.0)
+    
+    
+    // bear, SE Bull
+    tp_bb_current_val_bear = 9
+    tp_bb_index_loop_bear = 0
+    tp_bb_weight_loop_bear = 0.0
+    tp_bb_weight2_loop_bear = 0.0
+    var tp_bb_last_index_bear = array.new_int(4)
+    var tp_bb_weight_bear = array.new_float(4)
+    two_away_below = (low[1] > price_20ema[1] - price_20ema_stdev[1]*2) and (low > price_20ema - price_20ema_stdev*2)
+    bb_below_index1 = low[2] < price_20ema[2] - price_20ema_stdev[2]*2
+    bb_below_index5 = index_counter(low[2] < price_20ema[2] - price_20ema_stdev[2]*2, 5)
+    bb_below_index7 = index_counter(low[2] < price_20ema[2] - price_20ema_stdev[2]*2, 7)
+    bb_below_index10 = index_counter(low[2] < price_20ema[2] - price_20ema_stdev[2]*2, 10)
+    if two_away_below
+        if bb_below_index1 and green_candle[1] and green_candle
+            tp_bb_current_val_bear := 3
+        if bb_below_index5 >= 3
+            tp_bb_current_val_bear := 0
+        if bb_below_index7 >= 5
+            tp_bb_current_val_bear := 1
+        if bb_below_index10 >= 7
+            tp_bb_current_val_bear := 2
+    
+    for i=0 to 3
+        tp_bb_index_loop_bear := tp_bb_current_val_bear == i ? 0 : array.get(tp_bb_last_index_bear, i) + 1
+        array.set(tp_bb_last_index_bear, i, tp_bb_index_loop_bear)
+        if tp_bb_index_loop_bear <= 10
+            tp_bb_weight_loop_bear := array.get(tp_bb_default_weights, i)
+            if i == 0 or i == 1
+                tp_bb_weight2_loop_bear :=
+                 tp_bb_current_val_bear == i and tp_bb_current_val_bear[1] == i and tp_bb_current_val_bear[2] == i ? tp_bb_weight_loop_bear*1.3 :
+                 tp_bb_current_val_bear == i and tp_bb_current_val_bear[1] == i ? tp_bb_weight_loop_bear*1.15 :
+                 tp_bb_index_loop_bear == 0 ? tp_bb_weight_loop_bear :
+                 array.get(tp_bb_weight_bear, i) - tp_bb_weight_loop_bear*0.1
+            if i == 2
+                tp_bb_weight2_loop_bear :=
+                 tp_bb_current_val_bear == i and tp_bb_current_val_bear[1] == i and tp_bb_current_val_bear[2] == i and tp_bb_current_val_bear[3] == i ?
+                 tp_bb_weight_loop_bear*1.4 :
+                 tp_bb_current_val_bear == i and tp_bb_current_val_bear[1] == i and tp_bb_current_val_bear[2] == i ? tp_bb_weight_loop_bear*1.25 :
+                 tp_bb_current_val_bear == i and tp_bb_current_val_bear[1] == i ? tp_bb_weight_loop_bear*1.1 :
+                 tp_bb_index_loop_bear == 0 ? tp_bb_weight_loop_bear :
+                 array.get(tp_bb_weight_bear, i) - tp_bb_weight_loop_bear*0.1
+            if i == 3
+                tp_bb_weight2_loop_bear :=
+                 tp_bb_index_loop_bear == 0 ? tp_bb_weight_loop_bear :
+                 array.get(tp_bb_weight_bear, i) - tp_bb_weight_loop_bear*0.14286
+            if tp_bb_weight2_loop_bear < 0.0
+                tp_bb_weight2_loop_bear := 0.0
+            array.set(tp_bb_weight_bear, i, tp_bb_weight2_loop_bear)
+        else
+            array.set(tp_bb_weight_bear, i, 0.0)
+    
+    
+    
+    // MTV Gulfing & MTV Wicky TP
+    // bull, SE Bear
+    tp_mtvgnw_current_val_bull = 9
+    tp_mtvgnw_index_loop_bull = 0
+    tp_mtvgnw_weight_loop_bull = 0.0
+    tp_mtvgnw_weight2_loop_bull = 0.0
+    var tp_mtvgnw_last_index_bull = array.new_int(6)
+    var tp_mtvgnw_weight_bull = array.new_float(6)
+    // gulfing
+    if bull_5 and not below_3x20ema
+        if engulfing_vol[2]
+            tp_mtvgnw_current_val_bull := 0 // G2, 1.0
+        if engulfing_vol[1]
+            tp_mtvgnw_current_val_bull := 1 // G3, 1.15
+        if engulfing_vol
+            tp_mtvgnw_current_val_bull := 2 // G4, 1.3
+    // wicky
+    if green_candle and (high-close) > tr*0.35 and not below_3x20ema and index_counter(green_colour, 10) >= 7 // top wick > 35%
+        if engulfing_vol[2]
+            tp_mtvgnw_current_val_bull := 3 // W3, 2.0
+        if engulfing_vol[1]
+            tp_mtvgnw_current_val_bull := 4 // W4, 2.25
+        if engulfing_vol
+            tp_mtvgnw_current_val_bull := 5 // W5, 2.5
+    
+    for i=0 to 5
+        tp_mtvgnw_index_loop_bull := tp_mtvgnw_current_val_bull == i ? 0 : array.get(tp_mtvgnw_last_index_bull, i) + 1
+        array.set(tp_mtvgnw_last_index_bull, i, tp_mtvgnw_index_loop_bull)
+        if tp_mtvgnw_index_loop_bull <= 15
+            tp_mtvgnw_weight_loop_bull := i <= 2 ? 1+0.15*i : (2+0.25*(i-3))*0.75
+            tp_mtvgnw_weight2_loop_bull := 
+             tp_mtvgnw_current_val_bull == i and tp_mtvgnw_current_val_bull[1] == i and tp_mtvgnw_current_val_bull[2] == i ? tp_mtvgnw_weight_loop_bull*1.35 :
+             tp_mtvgnw_current_val_bull == i and tp_mtvgnw_current_val_bull[1] == i ? tp_mtvgnw_weight_loop_bull*1.15 :
+             tp_mtvgnw_index_loop_bull == 0 ? tp_mtvgnw_weight_loop_bull :
+             array.get(tp_mtvgnw_weight_bull, i) - tp_mtvgnw_weight_loop_bull*0.066667
+            if tp_mtvgnw_weight2_loop_bull < 0.0
+                tp_mtvgnw_weight2_loop_bull := 0.0
+            array.set(tp_mtvgnw_weight_bull, i, tp_mtvgnw_weight2_loop_bull)
+        else
+            array.set(tp_mtvgnw_weight_bull, i, 0.0)
+    
+    
+    // bear, SE Bull
+    tp_mtvgnw_current_val_bear = 9
+    tp_mtvgnw_index_loop_bear = 0
+    tp_mtvgnw_weight_loop_bear = 0.0
+    tp_mtvgnw_weight2_loop_bear = 0.0
+    var tp_mtvgnw_last_index_bear = array.new_int(6)
+    var tp_mtvgnw_weight_bear = array.new_float(6)
+    // gulfing
+    if bear_5 and not above_3x20ema
+        if engulfing_vol[2]
+            tp_mtvgnw_current_val_bear := 0 // G2, 1.0
+        if engulfing_vol[1]
+            tp_mtvgnw_current_val_bear := 1 // G3, 1.15
+        if engulfing_vol
+            tp_mtvgnw_current_val_bear := 2 // G4, 1.3
+    // wicky
+    if red_candle and (close-low) > tr*0.35 and not above_3x20ema and index_counter(red_colour, 10) >= 7 // bottom wick > 35%
+        if engulfing_vol[2]
+            tp_mtvgnw_current_val_bear := 3 // W3, 2.0
+        if engulfing_vol[1]
+            tp_mtvgnw_current_val_bear := 4 // W4, 2.25
+        if engulfing_vol
+            tp_mtvgnw_current_val_bear := 5 // W5, 2.5
+    
+    for i=0 to 5
+        tp_mtvgnw_index_loop_bear := tp_mtvgnw_current_val_bear == i ? 0 : array.get(tp_mtvgnw_last_index_bear, i) + 1
+        array.set(tp_mtvgnw_last_index_bear, i, tp_mtvgnw_index_loop_bear)
+        if tp_mtvgnw_index_loop_bear <= 15
+            tp_mtvgnw_weight_loop_bear := i <= 2 ? 1+0.15*i : (2+0.25*(i-3))*0.75
+            tp_mtvgnw_weight2_loop_bear := 
+             tp_mtvgnw_current_val_bear == i and tp_mtvgnw_current_val_bear[1] == i and tp_mtvgnw_current_val_bear[2] == i ? tp_mtvgnw_weight_loop_bear*1.35 :
+             tp_mtvgnw_current_val_bear == i and tp_mtvgnw_current_val_bear[1] == i ? tp_mtvgnw_weight_loop_bear*1.15 :
+             tp_mtvgnw_index_loop_bear == 0 ? tp_mtvgnw_weight_loop_bear :
+             array.get(tp_mtvgnw_weight_bear, i) - tp_mtvgnw_weight_loop_bear*0.066667
+            if tp_mtvgnw_weight2_loop_bear < 0.0
+                tp_mtvgnw_weight2_loop_bear := 0.0
+            array.set(tp_mtvgnw_weight_bear, i, tp_mtvgnw_weight2_loop_bear)
+        else
+            array.set(tp_mtvgnw_weight_bear, i, 0.0)
+    
+
+    
+    // MTV Candles TP
+    // bull, SE Bear
+    tp_mtvc_current_val_bull = 9
+    tp_mtvc_index_loop_bull = 0
+    tp_mtvc_weight_loop_bull = 0.0
+    tp_mtvc_weight2_loop_bull = 0.0
+    var tp_mtvc_last_index_bull = array.new_int(3)
+    var tp_mtvc_weight_bull = array.new_float(3)
+    if green_candle and (open-low) > tr*0.5 and not below_3x20ema
+        if bear_1
+            tp_mtvc_current_val_bull := 0 // 1, 1.0
+        if bull_2
+            tp_mtvc_current_val_bull := 1 // 2, 1.15
+        if bear_2
+            tp_mtvc_current_val_bull := 2 // 4, 1.35
+    
+    for i=0 to 2
+        tp_mtvc_index_loop_bull := tp_mtvc_current_val_bull == i ? 0 : array.get(tp_mtvc_last_index_bull, i) + 1
+        array.set(tp_mtvc_last_index_bull, i, tp_mtvc_index_loop_bull)
+        if tp_mtvc_index_loop_bull <= 5
+            tp_mtvc_weight_loop_bull := 1+0.2*i-0.05*ceil(i/3)
+            tp_mtvc_weight2_loop_bull := 
+             tp_mtvc_current_val_bull == i and tp_mtvc_current_val_bull[1] == i and tp_mtvc_current_val_bull[2] == i ? tp_mtvc_weight_loop_bull*1.25 :
+             tp_mtvc_current_val_bull == i and tp_mtvc_current_val_bull[1] == i ? tp_mtvc_weight_loop_bull*1.1 :
+             tp_mtvc_index_loop_bull == 0 ? tp_mtvc_weight_loop_bull :
+             array.get(tp_mtvc_weight_bull, i) - tp_mtvc_weight_loop_bull*0.2
+            if tp_mtvc_weight2_loop_bull < 0.0
+                tp_mtvc_weight2_loop_bull := 0.0
+            array.set(tp_mtvc_weight_bull, i, tp_mtvc_weight2_loop_bull)
+        else
+            array.set(tp_mtvc_weight_bull, i, 0.0)
+    
+    
+    // bear, SE Bull
+    tp_mtvc_current_val_bear = 9
+    tp_mtvc_index_loop_bear = 0
+    tp_mtvc_weight_loop_bear = 0.0
+    tp_mtvc_weight2_loop_bear = 0.0
+    var tp_mtvc_last_index_bear = array.new_int(3)
+    var tp_mtvc_weight_bear = array.new_float(3)
+    if red_candle and (high-open) > tr*0.5 and not above_3x20ema
+        if bull_1
+            tp_mtvc_current_val_bear := 0 // 1, 1.0
+        if bear_2
+            tp_mtvc_current_val_bear := 1 // 2, 1.15
+        if bull_2
+            tp_mtvc_current_val_bear := 2 // 4, 1.35
+    
+    for i=0 to 2
+        tp_mtvc_index_loop_bear := tp_mtvc_current_val_bear == i ? 0 : array.get(tp_mtvc_last_index_bear, i) + 1
+        array.set(tp_mtvc_last_index_bear, i, tp_mtvc_index_loop_bear)
+        if tp_mtvc_index_loop_bear <= 5
+            tp_mtvc_weight_loop_bear := 1+0.2*i-0.05*ceil(i/3)
+            tp_mtvc_weight2_loop_bear := 
+             tp_mtvc_current_val_bear == i and tp_mtvc_current_val_bear[1] == i and tp_mtvc_current_val_bear[2] == i ? tp_mtvc_weight_loop_bear*1.25 :
+             tp_mtvc_current_val_bear == i and tp_mtvc_current_val_bear[1] == i ? tp_mtvc_weight_loop_bear*1.1 :
+             tp_mtvc_index_loop_bear == 0 ? tp_mtvc_weight_loop_bear :
+             array.get(tp_mtvc_weight_bear, i) - tp_mtvc_weight_loop_bear*0.2
+            if tp_mtvc_weight2_loop_bear < 0.0
+                tp_mtvc_weight2_loop_bear := 0.0
+            array.set(tp_mtvc_weight_bear, i, tp_mtvc_weight2_loop_bear)
+        else
+            array.set(tp_mtvc_weight_bear, i, 0.0)
+    
+    
+    
+    // MTV Dots TP    
+    // bull, SE Bear
+    tp_mtvd_current_val_bull = 9
+    tp_mtvd_index_loop_bull = 0
+    tp_mtvd_weight_loop_bull = 0.0
+    tp_mtvd_weight2_loop_bull = 0.0
+    var tp_mtvd_last_index_bull = array.new_int(5)
+    var tp_mtvd_weight_bull = array.new_float(5)
+    if bull_dot_l[1] and not (bull_dots or bear_dots) // Last 15, D2 = 1.15
+        tp_mtvd_current_val_bull := 4
+    if bear_dot_s and bull_dot_m[1] // Last 10, D4 = 1.4
+        tp_mtvd_current_val_bull := 3
+    if bear_dot_s and bull_dot_l[1] // Last 10, D3 = 1.3
+        tp_mtvd_current_val_bull := 2
+    if bear_dot_s and bull_dot_m // Last 5, D2 = 1.15
+        tp_mtvd_current_val_bull := 1
+    if bear_dot_s and bull_dot_l // Last 5, D1 = 1.0
+        tp_mtvd_current_val_bull := 0
+    
+    for i=0 to 4
+        tp_mtvd_index_loop_bull := tp_mtvd_current_val_bull == i ? 0 : array.get(tp_mtvd_last_index_bull, i) + 1
+        array.set(tp_mtvd_last_index_bull, i, tp_mtvd_index_loop_bull)
+        if tp_mtvd_index_loop_bull <= 15
+            tp_mtvd_weight_loop_bull := array.get(tp_mtvd_default_weights, i)
+            tp_mtvd_weight2_loop_bull :=
+             tp_mtvd_index_loop_bull == 0 ? tp_mtvd_weight_loop_bull :
+             i == 0 or i == 1 ? array.get(tp_mtvd_weight_bull, i) - tp_mtvd_weight_loop_bull*0.2 :
+             i == 2 or i == 3 ? array.get(tp_mtvd_weight_bull, i) - tp_mtvd_weight_loop_bull*0.1 :
+             array.get(tp_mtvd_weight_bull, i) - tp_mtvd_weight_loop_bull*0.066667
+            if tp_mtvd_weight2_loop_bull < 0.0
+                tp_mtvd_weight2_loop_bull := 0.0
+            array.set(tp_mtvd_weight_bull, i, tp_mtvd_weight2_loop_bull)
+        else
+            array.set(tp_mtvd_weight_bull, i, 0.0)
+    
+    
+    // bear, SE Bull
+    tp_mtvd_current_val_bear = 9
+    tp_mtvd_index_loop_bear = 0
+    tp_mtvd_weight_loop_bear = 0.0
+    tp_mtvd_weight2_loop_bear = 0.0
+    var tp_mtvd_last_index_bear = array.new_int(5)
+    var tp_mtvd_weight_bear = array.new_float(5)
+    if bear_dot_l[1] and not (bear_dots or bull_dots) // Last 15, D2 = 1.15
+        tp_mtvd_current_val_bear := 4
+    if bull_dot_s and bear_dot_m[1] // Last 10, D4 = 1.4
+        tp_mtvd_current_val_bear := 3
+    if bull_dot_s and bear_dot_l[1] // Last 10, D3 = 1.3
+        tp_mtvd_current_val_bear := 2
+    if bull_dot_s and bear_dot_m // Last 5, D2 = 1.15
+        tp_mtvd_current_val_bear := 1
+    if bull_dot_s and bear_dot_l // Last 5, D1 = 1.0
+        tp_mtvd_current_val_bear := 0
+    
+    for i=0 to 4
+        tp_mtvd_index_loop_bear := tp_mtvd_current_val_bear == i ? 0 : array.get(tp_mtvd_last_index_bear, i) + 1
+        array.set(tp_mtvd_last_index_bear, i, tp_mtvd_index_loop_bear)
+        if tp_mtvd_index_loop_bear <= 15
+            tp_mtvd_weight_loop_bear := array.get(tp_mtvd_default_weights, i)
+            tp_mtvd_weight2_loop_bear :=
+             tp_mtvd_index_loop_bear == 0 ? tp_mtvd_weight_loop_bear :
+             i == 0 or i == 1 ? array.get(tp_mtvd_weight_bear, i) - tp_mtvd_weight_loop_bear*0.2 :
+             i == 2 or i == 3 ? array.get(tp_mtvd_weight_bear, i) - tp_mtvd_weight_loop_bear*0.1 :
+             array.get(tp_mtvd_weight_bear, i) - tp_mtvd_weight_loop_bear*0.066667
+            if tp_mtvd_weight2_loop_bear < 0.0
+                tp_mtvd_weight2_loop_bear := 0.0
+            array.set(tp_mtvd_weight_bear, i, tp_mtvd_weight2_loop_bear)
+        else
+            array.set(tp_mtvd_weight_bear, i, 0.0)
+    
+    
+    
+    // MTV Lots TP    
+    // bull, SE Bear
+    tp_mtvl_index_loop_bull = 0
+    tp_mtvl_weight_loop_bull = 0.0
+    tp_mtvl_weight2_loop_bull = 0.0
+    var tp_mtvl_last_index_bull = array.new_int(6)
+    var tp_mtvl_weight_bull = array.new_float(6)
+    tp_mtvl_current_val_bull =
+     bull_4_index10 >= 7 ? 5 :
+     bull_4_index7 >= 5 ? 4 :
+     bull_2_index10 >= 7 ? 3 :
+     bull_2_index7 >= 5 ? 2 :
+     bull_1_index10 >= 7 ? 1 :
+     bull_1_index7 >= 5 ? 0 : 9
+    
+    for i=0 to 5
+        tp_mtvl_index_loop_bull := tp_mtvl_current_val_bull == i ? 0 : array.get(tp_mtvl_last_index_bull, i) + 1
+        array.set(tp_mtvl_last_index_bull, i, tp_mtvl_index_loop_bull)
+        if tp_mtvl_index_loop_bull <= 10
+            tp_mtvl_weight_loop_bull := array.get(tp_mtvl_default_weights, i)
+            if not(i%2)
+                tp_mtvl_weight2_loop_bull :=
+                 tp_mtvl_current_val_bull == i and tp_mtvl_current_val_bull[1] == i and tp_mtvl_current_val_bull[2] == i ? tp_mtvl_weight_loop_bull*1.3 :
+                 tp_mtvl_current_val_bull == i and tp_mtvl_current_val_bull[1] == i ? tp_mtvl_weight_loop_bull*1.15 :
+                 tp_mtvl_index_loop_bull == 0 ? tp_mtvl_weight_loop_bull :
+                 array.get(tp_mtvl_weight_bull, i) - tp_mtvl_weight_loop_bull*0.1
+            if i%2
+                tp_mtvl_weight2_loop_bull :=
+                 tp_mtvl_current_val_bull == i and tp_mtvl_current_val_bull[1] == i and tp_mtvl_current_val_bull[2] == i and tp_mtvl_current_val_bull[3] == i ?
+                 tp_mtvl_weight_loop_bull*1.4 :
+                 tp_mtvl_current_val_bull == i and tp_mtvl_current_val_bull[1] == i and tp_mtvl_current_val_bull[2] == i ? tp_mtvl_weight_loop_bull*1.25 :
+                 tp_mtvl_current_val_bull == i and tp_mtvl_current_val_bull[1] == i ? tp_mtvl_weight_loop_bull*1.1 :
+                 tp_mtvl_index_loop_bull == 0 ? tp_mtvl_weight_loop_bull :
+                 array.get(tp_mtvl_weight_bull, i) - tp_mtvl_weight_loop_bull*0.1
+            if tp_mtvl_weight2_loop_bull < 0.0
+                tp_mtvl_weight2_loop_bull := 0.0
+            array.set(tp_mtvl_weight_bull, i, tp_mtvl_weight2_loop_bull)
+        else
+            array.set(tp_mtvl_weight_bull, i, 0.0)
+    
+    
+    // bear, SE Bull
+    tp_mtvl_index_loop_bear = 0
+    tp_mtvl_weight_loop_bear = 0.0
+    tp_mtvl_weight2_loop_bear = 0.0
+    var tp_mtvl_last_index_bear = array.new_int(6)
+    var tp_mtvl_weight_bear = array.new_float(6)
+    tp_mtvl_current_val_bear =
+     bear_4_index10 >= 7 ? 5 :
+     bear_4_index7 >= 5 ? 4 :
+     bear_2_index10 >= 7 ? 3 :
+     bear_2_index7 >= 5 ? 2 :
+     bear_1_index10 >= 7 ? 1 :
+     bear_1_index7 >= 5 ? 0 : 9
+    
+    for i=0 to 5
+        tp_mtvl_index_loop_bear := tp_mtvl_current_val_bear == i ? 0 : array.get(tp_mtvl_last_index_bear, i) + 1
+        array.set(tp_mtvl_last_index_bear, i, tp_mtvl_index_loop_bear)
+        if tp_mtvl_index_loop_bear <= 10
+            tp_mtvl_weight_loop_bear := array.get(tp_mtvl_default_weights, i)
+            if not(i%2)
+                tp_mtvl_weight2_loop_bear :=
+                 tp_mtvl_current_val_bear == i and tp_mtvl_current_val_bear[1] == i and tp_mtvl_current_val_bear[2] == i ? tp_mtvl_weight_loop_bear*1.3 :
+                 tp_mtvl_current_val_bear == i and tp_mtvl_current_val_bear[1] == i ? tp_mtvl_weight_loop_bear*1.15 :
+                 tp_mtvl_index_loop_bear == 0 ? tp_mtvl_weight_loop_bear :
+                 array.get(tp_mtvl_weight_bear, i) - tp_mtvl_weight_loop_bear*0.1
+            if i%2
+                tp_mtvl_weight2_loop_bear :=
+                 tp_mtvl_current_val_bear == i and tp_mtvl_current_val_bear[1] == i and tp_mtvl_current_val_bear[2] == i and tp_mtvl_current_val_bear[3] == i ?
+                 tp_mtvl_weight_loop_bear*1.4 :
+                 tp_mtvl_current_val_bear == i and tp_mtvl_current_val_bear[1] == i and tp_mtvl_current_val_bear[2] == i ? tp_mtvl_weight_loop_bear*1.25 :
+                 tp_mtvl_current_val_bear == i and tp_mtvl_current_val_bear[1] == i ? tp_mtvl_weight_loop_bear*1.1 :
+                 tp_mtvl_index_loop_bear == 0 ? tp_mtvl_weight_loop_bear :
+                 array.get(tp_mtvl_weight_bear, i) - tp_mtvl_weight_loop_bear*0.1
+            if tp_mtvl_weight2_loop_bear < 0.0
+                tp_mtvl_weight2_loop_bear := 0.0
+            array.set(tp_mtvl_weight_bear, i, tp_mtvl_weight2_loop_bear)
+        else
+            array.set(tp_mtvl_weight_bear, i, 0.0)
+    
+    
+    
+    
+    
+    // AGGREGATED Weight
+    // MTVD
+    // bull
+    mtvd_last_index_bull = barssince(bull_dot_m or bull_dot_l)
+    mtvd_current_weight_bull = mtvd_m_weight_bull + mtvd_l_weight_bull*1.5
+    var mtvd_ag_weight_bull = 0.0
+    mtvd_ag_weight_bull := mtvd_last_index_bull >= 10 ? 0.0 :
+     mtvd_current_weight_bull + mtvd_ag_weight_bull[mtvd_last_index_bull] - mtvd_ag_weight_bull[mtvd_last_index_bull]*(mtvd_last_index_bull+1)*0.1
+    
+    // bear
+    mtvd_last_index_bear = barssince(bear_dot_m or bear_dot_l)
+    mtvd_current_weight_bear = mtvd_m_weight_bear + mtvd_l_weight_bear*1.5
+    var mtvd_ag_weight_bear = 0.0
+    mtvd_ag_weight_bear := mtvd_last_index_bear >= 10 ? 0.0 :
+     mtvd_current_weight_bear + mtvd_ag_weight_bear[mtvd_last_index_bear] - mtvd_ag_weight_bear[mtvd_last_index_bear]*(mtvd_last_index_bear+1)*0.1
+    
+    
+    
+    // MTVS
+    // bull
+    mtvs_amount_1_bull = max(array.get(mtvs_adjusted_weights_bull, 0), array.get(mtvs_adjusted_weights_bull, 1), array.get(mtvs_adjusted_weights_bull, 2))
+    mtvs_amount_1gd_bull = max(array.get(mtvs_adjusted_weights_bull, 0), array.get(mtvs_adjusted_weights_bull, 1))
+    mtvs_amount_2_bull = 0.0
+    mtvs_amount_2gd_bull = max(array.get(mtvs_adjusted_weights_bull, 9), array.get(mtvs_adjusted_weights_bull, 10))
+    mtvs_amount_3_bull = max(array.get(mtvs_adjusted_weights_bull, 12), array.get(mtvs_adjusted_weights_bull, 13), array.get(mtvs_adjusted_weights_bull, 14))
+    mtvs_amount_3gd_bull = max(array.get(mtvs_adjusted_weights_bull, 12), array.get(mtvs_adjusted_weights_bull, 13))
+    mtvs_amount_2x_bull = 0.0
+    for i=3 to 11
+        if i >= 3 and i <= 10
+            mtvs_amount_2_bull := max(mtvs_amount_2_bull, array.get(mtvs_adjusted_weights_bull, i))
+        if i == 11 and array.get(mtvs_adjusted_weights_bull, i) > mtvs_amount_2x_bull
+            mtvs_amount_2x_bull := array.get(mtvs_adjusted_weights_bull, i)
+    
+    mtvs_best_combo_bull = max(
+     mtvs_amount_1_bull and mtvs_amount_2_bull and mtvs_amount_3_bull ? (mtvs_amount_1_bull + mtvs_amount_2_bull + mtvs_amount_3_bull)*1.75: 0.0,
+     mtvs_amount_2_bull and mtvs_amount_3_bull and not(mtvs_amount_1_bull) ? (mtvs_amount_2_bull + mtvs_amount_3_bull)*1.45 : 0.0,
+     mtvs_amount_1_bull and mtvs_amount_3_bull and not(mtvs_amount_2_bull) ? (mtvs_amount_1_bull + mtvs_amount_3_bull)*1.0 : 0.0,
+     mtvs_amount_1gd_bull and mtvs_amount_2gd_bull and mtvs_amount_3gd_bull ? (mtvs_amount_1gd_bull + mtvs_amount_2gd_bull + mtvs_amount_3gd_bull)*2.0 : 0.0,
+     mtvs_amount_2gd_bull and mtvs_amount_3gd_bull and not(mtvs_amount_1_bull) ? (mtvs_amount_2gd_bull + mtvs_amount_3gd_bull)*1.65 : 0.0,
+     mtvs_amount_1gd_bull and mtvs_amount_3gd_bull and not(mtvs_amount_2_bull) ? (mtvs_amount_1gd_bull + mtvs_amount_3gd_bull)*1.2 : 0.0)
+    
+    // bear
+    mtvs_amount_1_bear = max(array.get(mtvs_adjusted_weights_bear, 0), array.get(mtvs_adjusted_weights_bear, 1), array.get(mtvs_adjusted_weights_bear, 2))
+    mtvs_amount_1gd_bear = max(array.get(mtvs_adjusted_weights_bear, 0), array.get(mtvs_adjusted_weights_bear, 1))
+    mtvs_amount_2_bear = 0.0
+    mtvs_amount_2gd_bear = max(array.get(mtvs_adjusted_weights_bear, 9), array.get(mtvs_adjusted_weights_bear, 10))
+    mtvs_amount_3_bear = max(array.get(mtvs_adjusted_weights_bear, 12), array.get(mtvs_adjusted_weights_bear, 13), array.get(mtvs_adjusted_weights_bear, 14))
+    mtvs_amount_3gd_bear = max(array.get(mtvs_adjusted_weights_bear, 12), array.get(mtvs_adjusted_weights_bear, 13))
+    mtvs_amount_2x_bear = 0.0
+    for i=3 to 11
+        if i >= 3 and i <= 10
+            mtvs_amount_2_bear := max(mtvs_amount_2_bear, array.get(mtvs_adjusted_weights_bear, i))
+        if i == 11 and array.get(mtvs_adjusted_weights_bear, i) > mtvs_amount_2x_bear
+            mtvs_amount_2x_bear := array.get(mtvs_adjusted_weights_bear, i)
+    
+    mtvs_best_combo_bear = max(
+     mtvs_amount_1_bear and mtvs_amount_2_bear and mtvs_amount_3_bear ? (mtvs_amount_1_bear + mtvs_amount_2_bear + mtvs_amount_3_bear)*1.75: 0.0,
+     mtvs_amount_2_bear and mtvs_amount_3_bear and not(mtvs_amount_1_bear) ? (mtvs_amount_2_bear + mtvs_amount_3_bear)*1.45 : 0.0,
+     mtvs_amount_1_bear and mtvs_amount_3_bear and not(mtvs_amount_2_bear) ? (mtvs_amount_1_bear + mtvs_amount_3_bear)*1.0 : 0.0,
+     mtvs_amount_1gd_bear and mtvs_amount_2gd_bear and mtvs_amount_3gd_bear ? (mtvs_amount_1gd_bear + mtvs_amount_2gd_bear + mtvs_amount_3gd_bear)*2.0 : 0.0,
+     mtvs_amount_2gd_bear and mtvs_amount_3gd_bear and not(mtvs_amount_1_bear) ? (mtvs_amount_2gd_bear + mtvs_amount_3gd_bear)*1.65 : 0.0,
+     mtvs_amount_1gd_bear and mtvs_amount_3gd_bear and not(mtvs_amount_2_bear) ? (mtvs_amount_1gd_bear + mtvs_amount_3gd_bear)*1.2 : 0.0)
+    
+    
+    
+    // TP Congruent, BB, MTVG, MTVW, MTVC, MTVD, MTVL
+    // bull, SE bear
+    tp_aggregated_weight_bull = mtvd_ag_weight_bull >= 4 ? (mtvd_ag_weight_bull-4)/4 : 0.0
+    for i=0 to 5
+        if i <= 2
+            tp_aggregated_weight_bull += array.get(tp_congruent_weight_bear, i)*0.9
+        if i <= 3
+            if i != 2 and good_3x20ema_weight_bear >= 1.2 // TP BB & 3x20ema
+                tp_aggregated_weight_bull += array.get(tp_bb_weight_bull, i)*0.7*1.3
+            else
+                tp_aggregated_weight_bull += array.get(tp_bb_weight_bull, i)*0.7
+        if i <= 5 // MTVG: 0, 1, 2 & MTVW: 3, 4, 5
+            if i <= 2
+                tp_aggregated_weight_bull += array.get(tp_mtvgnw_weight_bull, i)*0.6
+            else
+                tp_aggregated_weight_bull += array.get(tp_mtvgnw_weight_bull, i)*0.8
+        if i <= 2
+            tp_aggregated_weight_bull += array.get(tp_mtvc_weight_bull, i)*0.6
+        if i <= 4
+            tp_aggregated_weight_bull += array.get(tp_mtvd_weight_bull, i)*0.6
+        if i <= 5
+            tp_aggregated_weight_bull += array.get(tp_mtvl_weight_bull, i)*0.7
+    
+    
+    // bear, SE bull
+    tp_aggregated_weight_bear = mtvd_ag_weight_bear >= 4 ? (mtvd_ag_weight_bear-4)/4 : 0.0
+    for i=0 to 5
+        if i <= 2
+            tp_aggregated_weight_bear += array.get(tp_congruent_weight_bull, i)*0.9
+        if i <= 3
+            if i != 2 and good_3x20ema_weight_bull >= 1.2 // TP BB & 3x20ema
+                tp_aggregated_weight_bear += array.get(tp_bb_weight_bear, i)*0.7*1.3
+            else
+                tp_aggregated_weight_bear += array.get(tp_bb_weight_bear, i)*0.7
+        if i <= 5 // MTVG: 0, 1, 2 & MTVW: 3, 4, 5
+            if i <= 2
+                tp_aggregated_weight_bear += array.get(tp_mtvgnw_weight_bear, i)*0.6
+            else
+                tp_aggregated_weight_bear += array.get(tp_mtvgnw_weight_bear, i)*0.8
+        if i <= 2
+            tp_aggregated_weight_bear += array.get(tp_mtvc_weight_bear, i)*0.6
+        if i <= 4
+            tp_aggregated_weight_bear += array.get(tp_mtvd_weight_bear, i)*0.6
+        if i <= 5
+            tp_aggregated_weight_bear += array.get(tp_mtvl_weight_bear, i)*0.7
+    
+    
+    
+    // ADJUSTED Weight
+    // MTVD
+    // bull
+    mtvd_adjusted_bull = mtvd_current_weight_bull
+    if mtvd_ag_weight_bull >= 1.2 and mtvd_ag_weight_bull < 2
+        mtvd_adjusted_bull := (mtvd_current_weight_bull + mtvd_ag_weight_bull)*0.5
+    if mtvd_ag_weight_bear >= 4
+        mtvd_adjusted_bull *= sqrt(mtvd_ag_weight_bear)*0.5
+    for i=0 to 4
+        mtvd_adjusted_bull -= array.get(tp_mtvd_weight_bull, i)*0.6
+    
+    if mtvd_adjusted_bull < 0 or mtvd_current_weight_bull < 0.5 or mtvd_ag_weight_bull > 3
+        mtvd_adjusted_bull := 0.0
+    
+    // bear
+    mtvd_adjusted_bear = mtvd_current_weight_bear
+    if mtvd_ag_weight_bear >= 1.2 and mtvd_ag_weight_bear < 2
+        mtvd_adjusted_bear := (mtvd_current_weight_bear + mtvd_ag_weight_bear)*0.5
+    if mtvd_ag_weight_bull >= 4
+        mtvd_adjusted_bear *= sqrt(mtvd_ag_weight_bull)*0.5
+    for i=0 to 4
+        mtvd_adjusted_bear -= array.get(tp_mtvd_weight_bear, i)*0.6
+    
+    if mtvd_adjusted_bear < 0 or mtvd_current_weight_bear < 0.5 or mtvd_ag_weight_bear > 3
+        mtvd_adjusted_bear := 0.0
+    
+    // MTVS
+    // bull
+    mtvs_adjusted_bull = mtvs_best_combo_bull
+    mtvs_inlast5_index_bull = barssince(bull_2_index5 and index_counter(bull_5, 5))
+    mtvs_inlast10_index_bear = min(array.get(mtvs_last_index_bear, 1), array.get(mtvs_last_index_bear, 2))
+    mtvs_inlast15_index_bear = min(array.get(mtvs_last_index_bear, 9), array.get(mtvs_last_index_bear, 10),
+     array.get(mtvs_last_index_bear, 12), array.get(mtvs_last_index_bear, 13))
+    if mtvs_inlast5_index_bull < 5
+        mtvs_adjusted_bull := mtvs_best_combo_bull - mtvs_best_combo_bull*0.2*(5-mtvs_inlast5_index_bull)*0.5
+    if mtvs_inlast10_index_bear < 10
+        mtvs_adjusted_bull := mtvs_best_combo_bull - mtvs_best_combo_bull*0.1*(10-mtvs_inlast10_index_bear)*0.5
+    if mtvs_inlast15_index_bear < 15
+        mtvs_adjusted_bull -= mtvs_best_combo_bull*0.66666*(15-mtvs_inlast15_index_bear)*0.35
+    if mtvs_adjusted_bull < 0
+        mtvs_adjusted_bull := 0.0
+    
+    // bear
+    mtvs_adjusted_bear = mtvs_best_combo_bear
+    mtvs_inlast5_index_bear = barssince(bear_2_index5 and index_counter(bear_5, 5))
+    mtvs_inlast10_index_bull = min(array.get(mtvs_last_index_bull, 1), array.get(mtvs_last_index_bull, 2))
+    mtvs_inlast15_index_bull = min(array.get(mtvs_last_index_bull, 9), array.get(mtvs_last_index_bull, 10),
+     array.get(mtvs_last_index_bull, 12), array.get(mtvs_last_index_bull, 13))
+    if mtvs_inlast5_index_bear < 5
+        mtvs_adjusted_bear := mtvs_best_combo_bear - mtvs_best_combo_bear*0.2*(5-mtvs_inlast5_index_bear)*0.5
+    if mtvs_inlast10_index_bull < 10
+        mtvs_adjusted_bear := mtvs_best_combo_bear - mtvs_best_combo_bear*0.1*(10-mtvs_inlast10_index_bull)*0.5
+    if mtvs_inlast15_index_bull < 15
+        mtvs_adjusted_bear -= mtvs_best_combo_bear*0.66666*(15-mtvs_inlast15_index_bull)*0.35
+    if mtvs_adjusted_bear < 0
+        mtvs_adjusted_bear := 0.0
+    
+    // Large E
+    large_e_adjusted_bull = large_e_good_weight_bull and (array.get(mtvs_last_index_bull, 1) < 20 or array.get(mtvs_last_index_bull, 2) < 20) ?
+     sqrt(large_e_good_weight_bull) + sqrt(max(array.get(mtvs_adjusted_weights_bull, 1), array.get(mtvs_adjusted_weights_bull, 2))) :
+     large_e_good_weight_bull*1.3
+    
+    large_e_adjusted_bear = large_e_good_weight_bear and (array.get(mtvs_last_index_bear, 1) < 20 or array.get(mtvs_last_index_bear, 2) < 20) ?
+     sqrt(large_e_good_weight_bear) + sqrt(max(array.get(mtvs_adjusted_weights_bear, 1), array.get(mtvs_adjusted_weights_bear, 2))) :
+     large_e_good_weight_bear*1.3
+    
+    
+    // Run Up
+    run_up_index50_bull = index_counter(run_up_bull, 50)
+    run_up_index50_bear = index_counter(run_up_bear, 50)
+    run_up_weight_bull := run_up_weight_bull < 0.5 ? 1.0 : run_up_weight_bull
+    run_up_weight_bear := run_up_weight_bear < 0.5 ? 1.0 : run_up_weight_bear
+    
+    // bull
+    run_up_adjusted_bull = 0.0
+    run_up_section_amount_bull = 0
+    if run_up_index50_bull >= 5 // decrease: current trend is exhausted
+        run_up_adjusted_bull +=  1.35/(sqrt(run_up_weight_bull+0.5)*pow(run_up_index50_bull, 1/5)) 
+        run_up_section_amount_bull += 1
+    if run_up_last_index_bear >= 100 // decreases: opposite trend IMMENENT
+        run_up_adjusted_bull += 1.65/log10(run_up_last_index_bear*run_up_weight_bull) 
+        run_up_section_amount_bull += 1
+    
+    if run_up_index50_bull <= 3 // increase: trend has potential
+        run_up_adjusted_bull +=  sqrt(run_up_weight_bull+0.5)
+        run_up_section_amount_bull += 1
+    if run_up_index50_bear >= 5 // increase: opposite is exhausted
+        run_up_adjusted_bull +=  (sqrt(max(run_up_weight_bull, run_up_weight_bear)+0.5)*pow(run_up_index50_bear, 1/5))/1.35
+        run_up_section_amount_bull += 1
+    if run_up_last_index_bull >= 100 // increase: opposite trend IMMENENT
+        run_up_adjusted_bull += log10(run_up_last_index_bull*run_up_weight_bear)/1.65 
+        run_up_section_amount_bull += 1
+    
+    // bear
+    run_up_adjusted_bear = 0.0
+    run_up_section_amount_bear = 0
+    if run_up_index50_bear >= 5 // decrease: current trend is exhausted
+        run_up_adjusted_bear +=  1.35/(sqrt(run_up_weight_bear+0.5)*pow(run_up_index50_bear, 1/5)) 
+        run_up_section_amount_bear += 1
+    if run_up_last_index_bull >= 100 // decreases: opposite trend IMMENENT
+        run_up_adjusted_bear += 1.65/log10(run_up_last_index_bull*run_up_weight_bear) 
+        run_up_section_amount_bear += 1
+    
+    if run_up_index50_bear <= 3 // increase: trend has potential
+        run_up_adjusted_bear +=  sqrt(run_up_weight_bear+0.5)
+        run_up_section_amount_bear += 1
+    if run_up_index50_bull >= 5 // increase: opposite is exhausted
+        run_up_adjusted_bear +=  (sqrt(max(run_up_weight_bear, run_up_weight_bull)+0.5)*pow(run_up_index50_bull, 1/5))/1.35
+        run_up_section_amount_bear += 1
+    if run_up_last_index_bear >= 100 // increase: opposite trend IMMENENT
+        run_up_adjusted_bear += log10(run_up_last_index_bear*run_up_weight_bull)/1.65 
+        run_up_section_amount_bear += 1
+    
+    // adjusting weights back
+    if run_up_section_amount_bull
+        run_up_adjusted_bull /= run_up_section_amount_bull
+    if run_up_weight_bull == 1.0
+        run_up_adjusted_bull := pow(run_up_adjusted_bull, 1/3)
+        run_up_weight_bull := 0.0
+    run_up_adjusted_bull := not run_up_adjusted_bull ? 1.0 : run_up_adjusted_bull
+    
+    if run_up_section_amount_bear
+        run_up_adjusted_bear /= run_up_section_amount_bear
+    if run_up_weight_bear == 1.0
+        run_up_adjusted_bear := pow(run_up_adjusted_bear, 1/3)
+        run_up_weight_bear := 0.0
+    run_up_adjusted_bear := not run_up_adjusted_bear ? 1.0 : run_up_adjusted_bear
+
+
+    // POSITIONS
+    // bull
+    mtvs_pos_bull = 
+     mtvs_adjusted_bull >= 4 and mtvs_adjusted_bull < 8 ? 0.1+(mtvs_adjusted_bull-4)*0.05 :
+     mtvs_adjusted_bull >= 8 and mtvs_adjusted_bull < 12 ? 0.3+(mtvs_adjusted_bull-8)*0.175 :
+     mtvs_adjusted_bull >= 12 ? 1.0 :
+     0.0 // 10% to 30%, 30% to 100%
+    
+    large_e_pos_bull = 
+     large_e_adjusted_bull >= 1 and large_e_adjusted_bull < 1.3 ? 0.1+(large_e_adjusted_bull-1.0)*0.16666 :
+     large_e_adjusted_bull >= 1.3 and large_e_adjusted_bull < 2 ? 0.15+(large_e_adjusted_bull-1.3)*0.35714 : 
+     large_e_adjusted_bull >= 2 ? 0.4 :
+     0.0 // 10% to 15%, 15% to 40%
+    
+    mtvd_pos_bull =
+     mtvd_adjusted_bull >= 0.5 and mtvd_adjusted_bull < 0.6 ? 1.0+(mtvd_adjusted_bull-0.5)*1.0 :
+     mtvd_adjusted_bull >= 0.6 and mtvd_adjusted_bull < 1 ? 1.1+(mtvd_adjusted_bull-0.6)*1.375 :
+     mtvd_adjusted_bull >= 1 and mtvd_adjusted_bull < 1.2 ? 1.65+(mtvd_adjusted_bull-1.0)*1.0 :
+     mtvd_adjusted_bull >= 1.2 and mtvd_adjusted_bull < 1.5 ? 1.85+(mtvd_adjusted_bull-1.2)*0.5 :
+     mtvd_adjusted_bull >= 1.5 ? 2.0 :
+     0.0 // 100% to 110%, 110% to 165%, 165% to 185%, 185% to 200%
+    
+    run_up_adjusted_bull := run_up_adjusted_bull < 0.5 ? 0.5 : run_up_adjusted_bull
+    run_up_pos_bull =
+     run_up_adjusted_bull >= 0.5 and run_up_adjusted_bull < 1 ? 0.5+(run_up_adjusted_bull-0.5)*1.0 : 
+     run_up_adjusted_bull >= 1 and run_up_adjusted_bull < 1.4 ? 1.0+(run_up_adjusted_bull-1.0)*1.25 : 
+     run_up_adjusted_bull >= 1.4 ? 1.5 :
+     0.0 // 50% to 100%, 100% to 150%
+    
+    tp_pos_bull =
+     tp_aggregated_weight_bull >= .75 and tp_aggregated_weight_bull < 4.0 ? 0.1+(tp_aggregated_weight_bull-0.75)*0.070769 :
+     tp_aggregated_weight_bull >= 4.0 and tp_aggregated_weight_bull < 6.2 ? 0.33+(tp_aggregated_weight_bull-4.0)*0.031818 :
+     tp_aggregated_weight_bull >= 6.2 ? 0.4 :
+     0.0 // 10% to 33%, 33% to 40%
+    
+    multiplied_pos_bull = max(mtvs_pos_bull, large_e_pos_bull)*sqrt(mtvd_pos_bull*run_up_pos_bull*good_3x20ema_weight_bull)
+    enter_pos_bull =
+     multiplied_pos_bull >= 0.06 and multiplied_pos_bull < 0.1 ? 0.05 :
+     multiplied_pos_bull >= 0.1 and multiplied_pos_bull < 0.2 ? 0.05+(multiplied_pos_bull-0.1)*0.5 :
+     multiplied_pos_bull >= 0.2 and multiplied_pos_bull < 0.5 ? 0.1+(multiplied_pos_bull-0.2)*0.33333 :
+     multiplied_pos_bull >= 0.5 and multiplied_pos_bull < 0.85 ? 0.2+(multiplied_pos_bull-0.5)*0.14286 :
+     multiplied_pos_bull >= 0.85 and multiplied_pos_bull < 1.5 ? 0.25+(multiplied_pos_bull-0.85)*0.23077 :
+     multiplied_pos_bull >= 1.5 ? 0.4 :
+     0.0 // 5%, 5% to 10%, 10% to 20%, 20% to 25%, 25% to 40%
+    
+    
+    // bear
+    mtvs_pos_bear = 
+     mtvs_adjusted_bear >= 4 and mtvs_adjusted_bear < 8 ? 0.1+(mtvs_adjusted_bear-4)*0.05 :
+     mtvs_adjusted_bear >= 8 and mtvs_adjusted_bear < 12 ? 0.3+(mtvs_adjusted_bear-8)*0.175 :
+     mtvs_adjusted_bear >= 12 ? 1.0 :
+     0.0 // 10% to 30%, 30% to 100%
+    
+    large_e_pos_bear = 
+     large_e_adjusted_bear >= 1 and large_e_adjusted_bear < 1.3 ? 0.1+(large_e_adjusted_bear-1.0)*0.16666 :
+     large_e_adjusted_bear >= 1.3 and large_e_adjusted_bear < 2 ? 0.15+(large_e_adjusted_bear-1.3)*0.35714 : 
+     large_e_adjusted_bear >= 2 ? 0.4 :
+     0.0 // 10% to 15%, 15% to 40%
+    
+    mtvd_pos_bear = 
+     mtvd_adjusted_bear >= 0.5 and mtvd_adjusted_bear < 0.6 ? 1.0+(mtvd_adjusted_bear-0.5)*1.0 :
+     mtvd_adjusted_bear >= 0.6 and mtvd_adjusted_bear < 1 ? 1.1+(mtvd_adjusted_bear-0.6)*1.375 :
+     mtvd_adjusted_bear >= 1 and mtvd_adjusted_bear < 1.2 ? 1.65+(mtvd_adjusted_bear-1.0)*1.0 :
+     mtvd_adjusted_bear >= 1.2 and mtvd_adjusted_bear < 1.5 ? 1.85+(mtvd_adjusted_bear-1.2)*0.5 :
+     mtvd_adjusted_bear >= 1.5 ? 2.0 :
+     0.0 // 100% to 110%, 110% to 165%, 165% to 185%, 185% to 200%
+    
+    run_up_adjusted_bear := run_up_adjusted_bear < 0.5 ? 0.5 : run_up_adjusted_bear
+    run_up_pos_bear =
+     run_up_adjusted_bear >= 0.5 and run_up_adjusted_bear < 1 ? 0.5+(run_up_adjusted_bear-0.5)*1.0 : 
+     run_up_adjusted_bear >= 1 and run_up_adjusted_bear < 1.4 ? 1.0+(run_up_adjusted_bear-1.0)*1.25 : 
+     run_up_adjusted_bear >= 1.4 ? 1.5 :
+     0.0 // 50% to 100%, 100% to 150%
+    
+    tp_pos_bear =
+     tp_aggregated_weight_bear >= .75 and tp_aggregated_weight_bear < 4.0 ? 0.1+(tp_aggregated_weight_bear-0.75)*0.070769 :
+     tp_aggregated_weight_bear >= 4.0 and tp_aggregated_weight_bear < 6.2 ? 0.33+(tp_aggregated_weight_bear-4.0)*0.031818 :
+     tp_aggregated_weight_bear >= 6.2 ? 0.4 :
+     0.0 // 10% to 33%, 33% to 40%
+    
+    multiplied_pos_bear = max(mtvs_pos_bear, large_e_pos_bear)*sqrt(mtvd_pos_bear*run_up_pos_bear*good_3x20ema_weight_bear)
+    enter_pos_bear =
+     multiplied_pos_bear >= 0.06 and multiplied_pos_bear < 0.1 ? 0.05 :
+     multiplied_pos_bear >= 0.1 and multiplied_pos_bear < 0.2 ? 0.05+(multiplied_pos_bear-0.1)*0.5 :
+     multiplied_pos_bear >= 0.2 and multiplied_pos_bear < 0.5 ? 0.1+(multiplied_pos_bear-0.2)*0.33333 :
+     multiplied_pos_bear >= 0.5 and multiplied_pos_bear < 0.85 ? 0.2+(multiplied_pos_bear-0.5)*0.14286 :
+     multiplied_pos_bear >= 0.85 and multiplied_pos_bear < 1.5 ? 0.25+(multiplied_pos_bear-0.85)*0.23077 :
+     multiplied_pos_bear >= 1.5 ? 0.4 :
+     0.0 // 5%, 5% to 10%, 10% to 20%, 20% to 25%, 25% to 40%
+
+    
+    tp_enter_pos_bull= tp_pos_bear*sqrt(mtvd_pos_bull*run_up_pos_bull*good_3x20ema_weight_bull)
+    tp_enter_pos_bear = tp_pos_bull*sqrt(mtvd_pos_bear*run_up_pos_bear*good_3x20ema_weight_bear)
+
+    [tp_pos_bull, tp_enter_pos_bull, enter_pos_bull,
+     tp_pos_bear, tp_enter_pos_bear, enter_pos_bear]
+
+
+// Regular Displays
+plot(0.87, "1")
+plot(0.82, "2", linewidth = 4)
+plot(0.72, "3")
+// OTHER TF
+[tp_pos_5m_bull, tp_enter_pos_5m_bull, enter_pos_5m_bull,
+ tp_pos_5m_bear, tp_enter_pos_5m_bear, enter_pos_5m_bear] = security(syminfo.tickerid, "5", mtv_values(), barmerge.lookahead_on)
+[tp_pos_15m_bull, tp_enter_pos_15m_bull, enter_pos_15m_bull,
+ tp_pos_15m_bear, tp_enter_pos_15m_bear, enter_pos_15m_bear] = security(syminfo.tickerid, "15", mtv_values(), barmerge.lookahead_on)
+
+pos_tp_trigger = input(false, "----- TPs -----")
+enter_trigger = input(false, "----- Enters -----")
+minute_5_trigger = input(false, "5 Minute")
+// tp
+// bull
+if tp_pos_5m_bull and pos_tp_trigger and minute_5_trigger
+    label.new(x=bar_index, y=0.9, yloc=yloc.price, size=size.small,
+         text=tostring(decimal_place(tp_pos_5m_bull, 2)),
+         textcolor=color.black, color=#42bda8, style=label.style_label_down) 
+plot(0.93, "5m", color=not(tp_pos_5m_bull) and barssince(tp_pos_5m_bull) < 5 and minute%5 < 4 and pos_tp_trigger and minute_5_trigger ? #42bda8: na,
+ linewidth = 2, style = plot.style_cross)
+// bear
+if tp_pos_5m_bear and pos_tp_trigger and minute_5_trigger
+    label.new(x=bar_index, y=0.87, yloc=yloc.price, size=size.small,
+         text=tostring(decimal_place(tp_pos_5m_bear, 2)),
+         textcolor=color.black, color=#f06292, style=label.style_label_down) 
+plot(0.9, "5m", color=not(tp_pos_5m_bear) and barssince(tp_pos_5m_bear) < 5 and minute%5 < 4 and pos_tp_trigger and minute_5_trigger ? #f06292: na,
+ linewidth = 2, style = plot.style_cross)
+
+// enters
+// bull
+enter_text_5m_bull = enter_pos_5m_bull ? tostring(decimal_place(enter_pos_5m_bull, 2)) : ""
+if tp_enter_pos_5m_bull
+    if enter_pos_5m_bull
+        enter_text_5m_bull += ", "
+    enter_text_5m_bull += "p:"+tostring(decimal_place(tp_enter_pos_5m_bull, 2))
+if enter_text_5m_bull != "" and enter_trigger and minute_5_trigger
+    label.new(x=bar_index, y=0.82, yloc=yloc.price, size=size.small,
+         text=enter_text_5m_bull,
+         textcolor=color.black, color=color.green, style=label.style_label_down) 
+plot(0.85, "5m", color=enter_text_5m_bull == "" and barssince(enter_text_5m_bull != "") < 5 and minute%5 < 4 and enter_trigger and minute_5_trigger ? color.green: na,
+ linewidth = 2, style = plot.style_cross)
+// bear
+enter_text_5m_bear = enter_pos_5m_bear ? tostring(decimal_place(enter_pos_5m_bear, 2)) : ""
+if tp_enter_pos_5m_bear
+    if enter_pos_5m_bear
+        enter_text_5m_bear += ", "
+    enter_text_5m_bear += "p:"+tostring(decimal_place(tp_enter_pos_5m_bear, 2))
+if enter_text_5m_bear != "" and enter_trigger and minute_5_trigger
+    label.new(x=bar_index, y=0.82, yloc=yloc.price, size=size.small,
+         text=enter_text_5m_bear,
+         textcolor=color.black, color=color.red, style=label.style_label_down) 
+plot(0.85, "5m", color=enter_text_5m_bear == "" and barssince(enter_text_5m_bear != "") < 5 and minute%5 < 4 and enter_trigger and minute_5_trigger ? color.red: na,
+ linewidth = 2, style = plot.style_cross)
+
+
+
+
+
+minute_15_trigger = input(false, "15 Minute")
+// tp
+// bull
+if tp_pos_15m_bull and pos_tp_trigger and minute_15_trigger
+    label.new(x=bar_index, y=0.75, yloc=yloc.price, size=size.small,
+         text=tostring(decimal_place(tp_pos_15m_bull, 2)),
+         textcolor=color.black, color=#42bda8, style=label.style_label_down) 
+plot(0.78, "15m", color=not(tp_pos_15m_bull) and barssince(tp_pos_15m_bull) < 15 and minute%15 < 14 and pos_tp_trigger and minute_15_trigger ? #42bda8: na,
+ linewidth = 2, style = plot.style_cross)
+// bear
+if tp_pos_15m_bear and pos_tp_trigger and minute_15_trigger
+    label.new(x=bar_index, y=0.72, yloc=yloc.price, size=size.small,
+         text=tostring(decimal_place(tp_pos_15m_bear, 2)),
+         textcolor=color.black, color=#f06292, style=label.style_label_down) 
+plot(0.75, "15m", color=not(tp_pos_15m_bear) and barssince(tp_pos_15m_bear) < 15 and minute%15 < 14 and pos_tp_trigger and minute_15_trigger ? #f06292: na,
+ linewidth = 2, style = plot.style_cross)
+
+// enters
+// bull
+enter_text_15m_bull = enter_pos_15m_bull ? tostring(decimal_place(enter_pos_15m_bull, 2)) : ""
+if tp_enter_pos_15m_bull
+    if enter_pos_15m_bull
+        enter_text_15m_bull += ", "
+    enter_text_15m_bull += "p:"+tostring(decimal_place(tp_enter_pos_15m_bull, 2))
+if enter_text_15m_bull != "" and enter_trigger and minute_15_trigger
+    label.new(x=bar_index, y=0.67, yloc=yloc.price, size=size.small,
+         text=enter_text_15m_bull,
+         textcolor=color.black, color=color.green, style=label.style_label_down) 
+plot(0.7, "15m", color=enter_text_15m_bull == "" and barssince(enter_text_15m_bull != "") < 15 and minute%15 < 14 and enter_trigger and minute_15_trigger ? color.green: na,
+ linewidth = 2, style = plot.style_cross)
+// bear
+enter_text_15m_bear = enter_pos_15m_bear ? tostring(decimal_place(enter_pos_15m_bear, 2)) : ""
+if tp_enter_pos_15m_bear
+    if enter_pos_15m_bear
+        enter_text_15m_bear += ", "
+    enter_text_15m_bear += "p:"+tostring(decimal_place(tp_enter_pos_15m_bear, 2))
+if enter_text_15m_bear != "" and enter_trigger and minute_15_trigger
+    label.new(x=bar_index, y=0.67, yloc=yloc.price, size=size.small,
+         text=enter_text_15m_bear,
+         textcolor=color.black, color=color.red, style=label.style_label_down) 
+plot(0.7, "15m", color=enter_text_15m_bear == "" and barssince(enter_text_15m_bear != "") < 15 and minute%15 < 14 and enter_trigger and minute_15_trigger ? color.red: na,
+ linewidth = 2, style = plot.style_cross)
