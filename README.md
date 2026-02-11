@@ -1,9 +1,9 @@
 *Published 09/02/2026*
-# MTV-MTF (2021)
+# Probabilistic Market Scoring System (2021)
 > *A partially redacted historic snapshot*
 
-> Multi-Timeframe Signals (Pine Script v4). MTV (MACD Trending Volume), MTF (Multiple Time Frames)
 > This project is for representation purposes only, it is not a trading product. The public version shows the data architecture, and thought process.  
+> Multi-Timeframe Signals (Pine Script v4). MTV (MACD Trending Volume), MTF (Multiple Time Frames)
 
 Originally from 2021, where I aimed to build a continuous market tool, using multiple time frames and weighted signals to understand behaviour. It was created solely through independent research. 
 As a **partially redacted historic snapshot** of a project, it looks at **how** you can model the market in a probabilistic manner using volume and momentum across timeframes. Showing feature engineering and signal aggregation through a heuristic approach with weight decaying over time.
